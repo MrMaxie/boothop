@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag (v followed by the Cargo package version)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+      - uses: jdx/mise-action@v2
+      - name: Validate version tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: cargo run --locked --example release -- validate
+      - name: Install target
+        run: rustup target add ${{ matrix.target }}
+      - name: Install Linux linker
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes musl-tools
+      - name: Verify source and simulated behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo test --lib --locked
+          cargo test --examples --locked
+      - name: Build release
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Verify Windows runtime dependencies
+        if: runner.os == 'Windows'
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: cargo run --locked --example release -- verify-windows
+      - name: Verify Linux runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          if readelf -l target/${{ matrix.target }}/release/boothop | grep -q INTERP; then
+            echo 'Linux binary unexpectedly requires a dynamic interpreter'
+            exit 1
+          fi
+          if readelf -d target/${{ matrix.target }}/release/boothop | grep -q NEEDED; then
+            echo 'Linux binary unexpectedly requires shared libraries'
+            exit 1
+          fi
+      - name: Package without executing the application
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: cargo run --locked --example release -- package --platform ${{ matrix.platform }} --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+      - uses: jdx/mise-action@v2
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Check complete asset set
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: cargo run --locked --example release -- checksums
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft); then
+            if [ "$is_draft" != "true" ]; then
+              echo 'Release already published'
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" dist/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest
