@@ -29,6 +29,9 @@ boothop reboot <id>
 
 Boothop asks for confirmation before restarting.
 
+For a Windows shortcut without a terminal window, use `boothop-launcher.exe reboot <id>`.
+Keep the launcher beside `boothop.exe` and enable "Run as administrator" in the shortcut.
+
 ## Commands
 
 | Command | Description |

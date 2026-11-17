@@ -1,12 +1,19 @@
 [package]
 name = "boothop"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
+default-run = "boothop"
 license = "Apache-2.0"
 
 [[bin]]
 name = "boothop"
 path = "src/main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "boothop-launcher"
+path = "src/bin/boothop-launcher.rs"
 test = false
 bench = false
 
@@ -34,7 +41,7 @@ zip = { version = "=9.6.1", default-features = false, features = ["deflate"] }
 
 [target."cfg(windows)".dependencies]
 windows-service = "=0.8.1"
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_Shutdown", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Environment", "Win32_System_WindowsProgramming", "Win32_System_StationsAndDesktops", "Win32_System_RemoteDesktop", "Win32_System_Com", "Win32_Storage_FileSystem", "Win32_Security_Authorization"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_Shutdown", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Environment", "Win32_System_WindowsProgramming", "Win32_System_StationsAndDesktops", "Win32_System_RemoteDesktop", "Win32_System_Com", "Win32_Storage_FileSystem", "Win32_Security_Authorization", "Win32_UI_Controls"] }
 
 [target."cfg(unix)".dependencies]
 libc = "=0.2.191"

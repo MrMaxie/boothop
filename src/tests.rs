@@ -501,6 +501,46 @@ fn changed_device_with_same_id_and_label_is_rejected_after_countdown() {
 }
 
 #[test]
+fn default_restart_confirmation_only_asks_about_the_target() {
+    let mut system = Simulated {
+        approve: false,
+        ..Default::default()
+    };
+    let result = run(&["boothop", "reboot", "uefi:0002"], &mut system);
+    assert_eq!(result.code, 0);
+    assert_eq!(system.prompts, ["Restart into Linux?"]);
+    assert_eq!(system.events, ["discover", "preflight", "confirm"]);
+    assert!(system.values.is_empty());
+}
+
+#[test]
+fn delayed_confirmation_makes_clear_the_timer_starts_after_approval() {
+    let mut system = Simulated {
+        approve: false,
+        ..Default::default()
+    };
+    let result = run(
+        &[
+            "boothop",
+            "reboot",
+            "uefi:0002",
+            "--timeout",
+            "10",
+            "--force",
+        ],
+        &mut system,
+    );
+    assert_eq!(result.code, 0);
+    assert_eq!(
+        system.prompts,
+        [
+            "Restart into Linux?\nRestart 10 seconds after confirmation.\nForce applications to close. Unsaved work can be lost."
+        ]
+    );
+    assert_eq!(system.events, ["discover", "preflight", "confirm"]);
+}
+
+#[test]
 fn windows_confirmation_describes_application_grace_period() {
     let mut system = Simulated {
         application_grace: true,

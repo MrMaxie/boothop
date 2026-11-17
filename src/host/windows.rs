@@ -8,7 +8,6 @@ use windows_sys::Win32::{
     Foundation::*,
     Security::*,
     System::{Shutdown::*, Threading::*, WindowsProgramming::*},
-    UI::WindowsAndMessaging::*,
 };
 
 fn wide(value: &str) -> Vec<u16> {
@@ -106,19 +105,7 @@ pub fn confirmation(message: &str) -> Option<bool> {
     if !desktop_available() {
         return None;
     }
-    let answer = unsafe {
-        MessageBoxW(
-            ptr::null_mut(),
-            wide(message).as_ptr(),
-            wide("Boothop").as_ptr(),
-            MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION | MB_SETFOREGROUND,
-        )
-    };
-    match answer {
-        IDYES => Some(true),
-        IDNO => Some(false),
-        _ => None,
-    }
+    crate::windows_dialog::confirmation(message)
 }
 
 pub fn desktop_available() -> bool {

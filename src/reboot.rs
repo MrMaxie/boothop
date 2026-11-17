@@ -53,7 +53,7 @@ pub fn execute(system: &mut impl RebootSystem, request: &Request) -> Result<Stri
     let target = resolve(system.discover()?, &request.id)?;
     system.preflight(&target, request)?;
     let policy = match request.closure {
-        Closure::Graceful => "Close applications gracefully.".into(),
+        Closure::Graceful => String::new(),
         Closure::Force => "Force applications to close. Unsaved work can be lost.".into(),
         Closure::ForceAfter(seconds) if system.application_grace_period() => format!(
             "Ask applications to close, wait {seconds} seconds, then force restart. System services close at restart. Unsaved work can be lost."
@@ -62,10 +62,22 @@ pub fn execute(system: &mut impl RebootSystem, request: &Request) -> Result<Stri
             "Close gracefully, then force after {seconds} seconds. Unsaved work can be lost."
         ),
     };
-    let message = format!(
-        "Restart into {}?\nStart in {} seconds.\n{policy}",
-        target.label, request.delay
-    );
+    let mut message = format!("Restart into {}?", target.label);
+    if request.delay > 0 {
+        let unit = if request.delay == 1 {
+            "second"
+        } else {
+            "seconds"
+        };
+        message.push_str(&format!(
+            "\nRestart {} {unit} after confirmation.",
+            request.delay
+        ));
+    }
+    if !policy.is_empty() {
+        message.push('\n');
+        message.push_str(&policy);
+    }
     if !request.yes && !system.confirm(&message)? {
         return Ok("Restart cancelled.".into());
     }

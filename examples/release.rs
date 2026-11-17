@@ -19,6 +19,10 @@ fn validate(version: &str, tag: &str) -> Result<Version> {
     Ok(version)
 }
 
+fn launcher_asset(version: &Version) -> String {
+    format!("boothop-v{version}-windows-x86_64-launcher.exe")
+}
+
 fn package(root: &Path, version: &Version, platform: Platform, target: &str) -> Result<PathBuf> {
     let expected = match platform {
         Platform::Windows => "x86_64-pc-windows-msvc",
@@ -40,6 +44,12 @@ fn package(root: &Path, version: &Version, platform: Platform, target: &str) -> 
             )?;
             std::io::copy(&mut source, &mut zip)?;
             zip.finish()?;
+            fs::copy(
+                root.join("target")
+                    .join(target)
+                    .join("release/boothop-launcher.exe"),
+                root.join("dist").join(launcher_asset(version)),
+            )?;
         }
         Platform::Linux => {
             let gzip = flate2::write::GzEncoder::new(output, flate2::Compression::default());
@@ -60,10 +70,14 @@ fn package(root: &Path, version: &Version, platform: Platform, target: &str) -> 
 
 fn checksums(root: &Path, version: &Version) -> Result<()> {
     let mut lines = String::new();
-    for platform in [Platform::Windows, Platform::Linux] {
-        let name = platform.asset(version);
-        let mut file = fs::File::open(root.join("dist").join(&name))
-            .context("Both platform archives are required before publication")?;
+    for name in [
+        Platform::Windows.asset(version),
+        Platform::Linux.asset(version),
+        launcher_asset(version),
+    ] {
+        let mut file = fs::File::open(root.join("dist").join(&name)).context(
+            "Both platform archives and the Windows launcher are required before publication",
+        )?;
         let mut hash = Sha256::new();
         let mut buffer = [0; 65536];
         loop {
@@ -196,11 +210,26 @@ fn main() -> Result<()> {
         }
         Some("checksums") => checksums(root, &version)?,
         Some("verify-windows") => {
-            let data = fs::read(root.join("target/x86_64-pc-windows-msvc/release/boothop.exe"))?;
-            println!(
-                "Windows imports: {}",
-                windows_dependencies(&data)?.join(", ")
-            );
+            for (name, subsystem) in [("boothop.exe", 3), ("boothop-launcher.exe", 2)] {
+                let data = fs::read(
+                    root.join("target/x86_64-pc-windows-msvc/release")
+                        .join(name),
+                )?;
+                let dependencies = windows_dependencies(&data)?;
+                let pe = word(&data, 60, 4)? as usize;
+                ensure!(
+                    word(&data, pe + 24 + 68, 2)? == subsystem,
+                    "Unexpected subsystem for {name}"
+                );
+                for marker in ["Microsoft.Windows.Common-Controls", "PerMonitorV2"] {
+                    ensure!(
+                        data.windows(marker.len())
+                            .any(|bytes| bytes == marker.as_bytes()),
+                        "Missing manifest setting {marker} in {name}"
+                    );
+                }
+                println!("{name} imports: {}", dependencies.join(", "));
+            }
         }
         Some("validate") => (),
         _ => bail!("Unknown release action"),
@@ -246,10 +275,17 @@ mod tests {
             let path = root.path().join("target").join(target).join("release");
             fs::create_dir_all(&path).unwrap();
             fs::write(path.join(platform.executable()), b"simulated executable").unwrap();
+            if platform == Platform::Windows {
+                fs::write(path.join("boothop-launcher.exe"), b"simulated launcher").unwrap();
+            }
             let archive = package(root.path(), &version, platform, target).unwrap();
             let mut content = Vec::new();
             match platform {
                 Platform::Windows => {
+                    assert_eq!(
+                        fs::read(root.path().join("dist").join(launcher_asset(&version))).unwrap(),
+                        b"simulated launcher"
+                    );
                     let mut zip = zip::ZipArchive::new(fs::File::open(archive).unwrap()).unwrap();
                     assert_eq!(zip.len(), 1);
                     let mut entry = zip.by_index(0).unwrap();
@@ -273,7 +309,7 @@ mod tests {
         assert!(package(root.path(), &version, Platform::Linux, "../wrong").is_err());
         checksums(root.path(), &version).unwrap();
         let sums = fs::read_to_string(root.path().join("dist/SHA256SUMS")).unwrap();
-        assert_eq!(sums.lines().count(), 2);
+        assert_eq!(sums.lines().count(), 3);
         for line in sums.lines() {
             let (hash, name) = line.split_once("  ").unwrap();
             let expected: String =
